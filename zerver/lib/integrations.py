@@ -401,6 +401,7 @@ WEBHOOK_INTEGRATIONS: List[WebhookIntegration] = [
     WebhookIntegration('zabbix', ['monitoring'], display_name='Zabbix'),
     WebhookIntegration('gci', ['misc'], display_name='Google Code-in',
                        stream_name='gci'),
+    WebhookIntegration('azuredevops_sg', ['misc'], display_name='Azure DevOps (SG)'),
 ]
 
 INTEGRATIONS: Dict[str, Integration] = {
