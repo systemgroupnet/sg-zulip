@@ -12,7 +12,7 @@ from zerver.models import UserProfile
 
 @api_key_only_webhook_view('AzureDevops_SG')
 @has_request_variables
-def api_azuredevops_webhook(
+def api_azuredevops_sg_webhook(
         request: HttpRequest, user_profile: UserProfile,
         payload: Dict[str, Iterable[Dict[str, Any]]]=REQ(argument_type='body'),
         topic: str=REQ(default='coverage')
