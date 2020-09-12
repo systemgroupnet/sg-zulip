@@ -99,7 +99,7 @@ TEST_SUITE = False
 # The new user tutorial is enabled by default, but disabled for client tests.
 TUTORIAL_ENABLED = True
 # This is overridden in test_settings.py for the test suites
-CASPER_TESTS = False
+PUPPETEER_TESTS = False
 # This is overridden in test_settings.py for the test suites
 RUNNING_OPENAPI_CURL_TEST = False
 # This is overridden in test_settings.py for the test suites
@@ -178,6 +178,7 @@ MIDDLEWARE = (
     # our logging middleware should be the top middleware item.
     'zerver.middleware.TagRequests',
     'zerver.middleware.SetRemoteAddrFromForwardedFor',
+    'zerver.middleware.RequestContext',
     'zerver.middleware.LogRequests',
     'zerver.middleware.JsonErrorHandler',
     'zerver.middleware.RateLimitMiddleware',
@@ -684,8 +685,8 @@ QUEUE_STATS_DIR = zulip_path("/var/log/zulip/queue_stats")
 DIGEST_LOG_PATH = zulip_path("/var/log/zulip/digest.log")
 ANALYTICS_LOG_PATH = zulip_path("/var/log/zulip/analytics.log")
 ANALYTICS_LOCK_DIR = zulip_path("/home/zulip/deployments/analytics-lock-dir")
-API_KEY_ONLY_WEBHOOK_LOG_PATH = zulip_path("/var/log/zulip/webhooks_errors.log")
-WEBHOOK_UNEXPECTED_EVENTS_LOG_PATH = zulip_path("/var/log/zulip/webhooks_unexpected_events.log")
+WEBHOOK_LOG_PATH = zulip_path("/var/log/zulip/webhooks_errors.log")
+WEBHOOK_UNSUPPORTED_EVENTS_LOG_PATH = zulip_path("/var/log/zulip/webhooks_unsupported_events.log")
 SOFT_DEACTIVATION_LOG_PATH = zulip_path("/var/log/zulip/soft_deactivation.log")
 TRACEMALLOC_DUMP_DIR = zulip_path("/var/log/zulip/tracemalloc")
 SCHEDULED_MESSAGE_DELIVERER_LOG_PATH = zulip_path("/var/log/zulip/scheduled_message_deliverer.log")
@@ -714,6 +715,9 @@ LOGGING: Dict[str, Any] = {
     'formatters': {
         'default': {
             '()': 'zerver.lib.logging_util.ZulipFormatter',
+        },
+        'webhook_request_data': {
+            '()': 'zerver.lib.logging_util.ZulipWebhookFormatter',
         },
     },
     'filters': {
@@ -789,6 +793,18 @@ LOGGING: Dict[str, Any] = {
             'class': 'logging.handlers.WatchedFileHandler',
             'formatter': 'default',
             'filename': SLOW_QUERIES_LOG_PATH,
+        },
+        'webhook_file': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.WatchedFileHandler',
+            'formatter': 'webhook_request_data',
+            'filename': WEBHOOK_LOG_PATH,
+        },
+        'webhook_unsupported_file': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.WatchedFileHandler',
+            'formatter': 'webhook_request_data',
+            'filename': WEBHOOK_UNSUPPORTED_EVENTS_LOG_PATH,
         },
     },
     'loggers': {
@@ -934,14 +950,14 @@ LOGGING: Dict[str, Any] = {
             'handlers': ['zulip_admins'],
             'propagate': False,
         },
-        'zulip.zerver.lib.webhooks.common': {
-            'level': 'DEBUG',
-            'handlers': ['file', 'errors_file'],
-            'propagate': False,
-        },
         'zulip.zerver.webhooks': {
             'level': 'DEBUG',
-            'handlers': ['file', 'errors_file'],
+            'handlers': ['webhook_file'],
+            'propagate': False,
+        },
+        'zulip.zerver.webhooks.unsupported': {
+            'level': 'DEBUG',
+            'handlers': ['webhook_unsupported_file'],
             'propagate': False,
         },
     },

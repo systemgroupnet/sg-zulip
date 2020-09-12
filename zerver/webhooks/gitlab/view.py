@@ -5,12 +5,12 @@ from typing import Any, Dict, Optional
 
 from django.http import HttpRequest, HttpResponse
 
-from zerver.decorator import api_key_only_webhook_view
+from zerver.decorator import webhook_view
+from zerver.lib.exceptions import UnsupportedWebhookEventType
 from zerver.lib.request import REQ, has_request_variables
 from zerver.lib.response import json_success
 from zerver.lib.validator import check_bool
 from zerver.lib.webhooks.common import (
-    UnexpectedWebhookEventType,
     check_send_webhook_message,
     validate_extract_webhook_http_header,
 )
@@ -353,7 +353,7 @@ EVENT_FUNCTION_MAPPER = {
     'Pipeline Hook': get_pipeline_event_body,
 }
 
-@api_key_only_webhook_view("Gitlab")
+@webhook_view("Gitlab")
 @has_request_variables
 def api_gitlab_webhook(request: HttpRequest, user_profile: UserProfile,
                        payload: Dict[str, Any]=REQ(argument_type='body'),
@@ -452,4 +452,4 @@ def get_event(request: HttpRequest, payload: Dict[str, Any], branches: Optional[
     if event in list(EVENT_FUNCTION_MAPPER.keys()):
         return event
 
-    raise UnexpectedWebhookEventType('GitLab', event)
+    raise UnsupportedWebhookEventType(event)

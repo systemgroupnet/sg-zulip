@@ -7,7 +7,6 @@ from io import BytesIO
 from typing import Callable, Dict, Optional, Tuple, TypeVar, Union, cast
 
 import django_otp
-import orjson
 from django.conf import settings
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.contrib.auth import login as django_login
@@ -32,9 +31,8 @@ from zerver.lib.exceptions import (
     OrganizationAdministratorRequired,
     OrganizationMemberRequired,
     OrganizationOwnerRequired,
-    UnexpectedWebhookEventType,
+    UnsupportedWebhookEventType,
 )
-from zerver.lib.logging_util import log_to_file
 from zerver.lib.queue import queue_json_publish
 from zerver.lib.rate_limiter import RateLimitedUser
 from zerver.lib.request import REQ, has_request_variables
@@ -50,11 +48,7 @@ if settings.ZILENCER_ENABLED:
     from zilencer.models import RemoteZulipServer, get_remote_server_by_uuid
 
 webhook_logger = logging.getLogger("zulip.zerver.webhooks")
-log_to_file(webhook_logger, settings.API_KEY_ONLY_WEBHOOK_LOG_PATH)
-
-webhook_unexpected_events_logger = logging.getLogger("zulip.zerver.lib.webhooks.common")
-log_to_file(webhook_unexpected_events_logger,
-            settings.WEBHOOK_UNEXPECTED_EVENTS_LOG_PATH)
+webhook_unsupported_events_logger = logging.getLogger("zulip.zerver.webhooks.unsupported")
 
 FuncT = TypeVar('FuncT', bound=Callable[..., object])
 
@@ -264,55 +258,13 @@ def access_user_by_api_key(request: HttpRequest, api_key: str, email: Optional[s
     return user_profile
 
 def log_exception_to_webhook_logger(
-    request: HttpRequest,
-    user_profile: UserProfile,
     summary: str,
-    payload: str,
-    unexpected_event: bool,
+    unsupported_event: bool,
 ) -> None:
-    if request.content_type == 'application/json':
-        try:
-            payload = orjson.dumps(orjson.loads(payload), option=orjson.OPT_INDENT_2).decode()
-        except orjson.JSONDecodeError:
-            pass
-
-    custom_header_template = "{header}: {value}\n"
-
-    header_text = ""
-    for header in request.META.keys():
-        if header.lower().startswith('http_x'):
-            header_text += custom_header_template.format(
-                header=header, value=request.META[header])
-
-    header_message = header_text if header_text else None
-
-    message = """
-summary: {summary}
-user: {email} ({realm})
-client: {client_name}
-URL: {path_info}
-content_type: {content_type}
-custom_http_headers:
-{custom_headers}
-body:
-
-{body}
-    """.format(
-        summary=summary,
-        email=user_profile.delivery_email,
-        realm=user_profile.realm.string_id,
-        client_name=request.client.name,
-        body=payload,
-        path_info=request.META.get('PATH_INFO', None),
-        content_type=request.content_type,
-        custom_headers=header_message,
-    )
-    message = message.strip(' ')
-
-    if unexpected_event:
-        webhook_unexpected_events_logger.exception(message, stack_info=True)
+    if unsupported_event:
+        webhook_unsupported_events_logger.exception(summary, stack_info=True)
     else:
-        webhook_logger.exception(message, stack_info=True)
+        webhook_logger.exception(summary, stack_info=True)
 
 def full_webhook_client_name(raw_client_name: Optional[str]=None) -> Optional[str]:
     if raw_client_name is None:
@@ -320,12 +272,13 @@ def full_webhook_client_name(raw_client_name: Optional[str]=None) -> Optional[st
     return f"Zulip{raw_client_name}Webhook"
 
 # Use this for webhook views that don't get an email passed in.
-def api_key_only_webhook_view(
+def webhook_view(
         webhook_client_name: str,
         notify_bot_owner_on_invalid_json: bool=True,
 ) -> Callable[[Callable[..., HttpResponse]], Callable[..., HttpResponse]]:
-    # TODO The typing here could be improved by using the Extended Callable types:
-    # https://mypy.readthedocs.io/en/latest/kinds_of_types.html#extended-callable-types
+    # Unfortunately, callback protocols are insufficient for this:
+    # https://mypy.readthedocs.io/en/stable/protocols.html#callback-protocols
+    # Variadic generics are necessary: https://github.com/python/typing/issues/193
     def _wrapped_view_func(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
         @csrf_exempt
         @has_request_variables
@@ -347,12 +300,11 @@ def api_key_only_webhook_view(
                     from zerver.lib.webhooks.common import notify_bot_owner_about_invalid_json
                     notify_bot_owner_about_invalid_json(user_profile, webhook_client_name)
                 else:
+                    if isinstance(err, UnsupportedWebhookEventType):
+                        err.webhook_name = webhook_client_name
                     log_exception_to_webhook_logger(
-                        request=request,
-                        user_profile=user_profile,
                         summary=str(err),
-                        payload=request.body,
-                        unexpected_event=isinstance(err, UnexpectedWebhookEventType),
+                        unsupported_event=isinstance(err, UnsupportedWebhookEventType),
                     )
                 raise err
 
@@ -596,14 +548,13 @@ def authenticated_rest_api_view(
                 return target_view_func(request, profile, *args, **kwargs)
             except Exception as err:
                 if is_webhook or webhook_client_name is not None:
+                    if isinstance(err, UnsupportedWebhookEventType) and webhook_client_name is not None:
+                        err.webhook_name = webhook_client_name
                     request_body = request.POST.get('payload')
                     if request_body is not None:
                         log_exception_to_webhook_logger(
-                            request=request,
-                            user_profile=profile,
                             summary=str(err),
-                            payload=request_body,
-                            unexpected_event=isinstance(err, UnexpectedWebhookEventType),
+                            unsupported_event=isinstance(err, UnsupportedWebhookEventType),
                         )
 
                 raise err

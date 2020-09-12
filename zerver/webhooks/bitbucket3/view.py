@@ -5,10 +5,11 @@ from typing import Any, Callable, Dict, List, Optional
 
 from django.http import HttpRequest, HttpResponse
 
-from zerver.decorator import api_key_only_webhook_view
+from zerver.decorator import webhook_view
+from zerver.lib.exceptions import UnsupportedWebhookEventType
 from zerver.lib.request import REQ, has_request_variables
 from zerver.lib.response import json_success
-from zerver.lib.webhooks.common import UnexpectedWebhookEventType, check_send_webhook_message
+from zerver.lib.webhooks.common import check_send_webhook_message
 from zerver.lib.webhooks.git import (
     CONTENT_MESSAGE_TEMPLATE,
     TOPIC_WITH_BRANCH_TEMPLATE,
@@ -133,7 +134,7 @@ def repo_push_branch_data(payload: Dict[str, Any], change: Dict[str, Any]) -> Di
         body = get_remove_branch_event_message(user_name, branch_name)
     else:
         message = "{}.{}".format(payload["eventKey"], event_type)  # nocoverage
-        raise UnexpectedWebhookEventType("BitBucket Server", message)
+        raise UnsupportedWebhookEventType(message)
 
     subject = TOPIC_WITH_BRANCH_TEMPLATE.format(repo=repo_name, branch=branch_name)
     return {"subject": subject, "body": body}
@@ -149,7 +150,7 @@ def repo_push_tag_data(payload: Dict[str, Any], change: Dict[str, Any]) -> Dict[
         action = "removed"
     else:
         message = "{}.{}".format(payload["eventKey"], event_type)  # nocoverage
-        raise UnexpectedWebhookEventType("BitBucket Server", message)
+        raise UnsupportedWebhookEventType(message)
 
     subject = BITBUCKET_TOPIC_TEMPLATE.format(repository_name=repo_name)
     body = get_push_tag_event_message(get_user_name(payload), tag_name, action=action)
@@ -170,7 +171,7 @@ def repo_push_handler(payload: Dict[str, Any], branches: Optional[str]=None,
             data.append(repo_push_tag_data(payload, change))
         else:
             message = "{}.{}".format(payload["eventKey"], event_target_type)  # nocoverage
-            raise UnexpectedWebhookEventType("BitBucket Server", message)
+            raise UnsupportedWebhookEventType(message)
     return data
 
 def get_assignees_string(pr: Dict[str, Any]) -> Optional[str]:
@@ -350,10 +351,10 @@ def get_event_handler(eventkey: str) -> Callable[..., List[Dict[str, str]]]:
     # The main reason for this function existence is because of mypy
     handler: Any = EVENT_HANDLER_MAP.get(eventkey)
     if handler is None:
-        raise UnexpectedWebhookEventType("BitBucket Server", eventkey)
+        raise UnsupportedWebhookEventType(eventkey)
     return handler
 
-@api_key_only_webhook_view("Bitbucket3")
+@webhook_view("Bitbucket3")
 @has_request_variables
 def api_bitbucket3_webhook(request: HttpRequest, user_profile: UserProfile,
                            payload: Dict[str, Any]=REQ(argument_type="body"),

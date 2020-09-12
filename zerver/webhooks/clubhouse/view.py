@@ -3,10 +3,11 @@ from typing import Any, Dict, Optional
 
 from django.http import HttpRequest, HttpResponse
 
-from zerver.decorator import api_key_only_webhook_view
+from zerver.decorator import webhook_view
+from zerver.lib.exceptions import UnsupportedWebhookEventType
 from zerver.lib.request import REQ, has_request_variables
 from zerver.lib.response import json_success
-from zerver.lib.webhooks.common import UnexpectedWebhookEventType, check_send_webhook_message
+from zerver.lib.webhooks.common import check_send_webhook_message
 from zerver.models import UserProfile
 
 EPIC_NAME_TEMPLATE = "**{name}**"
@@ -512,7 +513,7 @@ IGNORED_EVENTS = {
     'story-comment_update',
 }
 
-@api_key_only_webhook_view('ClubHouse')
+@webhook_view('ClubHouse')
 @has_request_variables
 def api_clubhouse_webhook(
         request: HttpRequest, user_profile: UserProfile,
@@ -533,7 +534,7 @@ def api_clubhouse_webhook(
     body_func: Any = EVENT_BODY_FUNCTION_MAPPER.get(event)
     topic_func = get_topic_function_based_on_type(payload)
     if body_func is None or topic_func is None:
-        raise UnexpectedWebhookEventType('Clubhouse', event)
+        raise UnsupportedWebhookEventType(event)
     topic = topic_func(payload)
     body = body_func(payload)
 
