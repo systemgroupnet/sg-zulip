@@ -6,4 +6,6 @@ module.exports = {
     classPrefix: "",
     baseSelector: ".zulip-icon",
     cssTemplate: "./template.hbs",
+    ligature: false,
+    writeFiles: false,
 };

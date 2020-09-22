@@ -255,7 +255,7 @@ html {
                 margin-left: -40px;
                 padding-left: 40px;
 
-                // Don't show the focus outline for the highlighted page.
+                /* Don't show the focus outline for the highlighted page. */
                 outline: 0;
             }
         }
@@ -446,7 +446,7 @@ img.screenshot {
 .laptop-image {
     width: 787px;
     height: 414px;
-    background-image: url(/static/images/landing-page/laptop.png);
+    background-image: url(../../images/landing-page/laptop.png);
     background-size: contain;
 }
 
@@ -686,7 +686,7 @@ input.text-error {
 }
 
 .main-headline {
-    background: url(/static/images/landing-page/gg.jpg);
+    background: url(../../images/landing-page/gg.jpg);
     background-position: center;
     background-size: cover;
 }
@@ -1680,6 +1680,17 @@ label.label-title {
 .api-argument {
     .api-argument-name {
         font-family: monospace;
+
+        .api-argument-hover-link i.fa {
+            opacity: 0;
+            font-size: 0.9em;
+        }
+
+        &:hover .api-argument-hover-link i.fa {
+            opacity: 1;
+            color: hsl(0, 0%, 0%);
+            cursor: pointer;
+        }
     }
 
     .api-argument-example-label {
@@ -1692,6 +1703,7 @@ label.label-title {
         font-size: 12px;
         color: hsl(14, 75%, 60%);
     }
+
     .api-argument-optional {
         text-transform: uppercase;
         font-weight: 400;

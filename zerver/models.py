@@ -734,7 +734,7 @@ def filter_pattern_validator(value: str) -> None:
         raise ValidationError(error_msg)
 
 def filter_format_validator(value: str) -> None:
-    regex = re.compile(r'^([\.\/:a-zA-Z0-9#_?=&;-]+%\(([a-zA-Z0-9_-]+)\)s)+[/a-zA-Z0-9#_?=&;-]*$')
+    regex = re.compile(r'^([\.\/:a-zA-Z0-9#_?=&;~-]+%\(([a-zA-Z0-9_-]+)\)s)+[/a-zA-Z0-9#_?=&;~-]*$')
 
     if not regex.match(value):
         raise ValidationError(_('Invalid URL format string.'))
@@ -1545,9 +1545,6 @@ class Stream(models.Model):
 
     def is_history_public_to_subscribers(self) -> bool:
         return self.history_public_to_subscribers
-
-    class Meta:
-        unique_together = ("name", "realm")
 
     # Stream fields included whenever a Stream object is provided to
     # Zulip clients via the API.  A few details worth noting:

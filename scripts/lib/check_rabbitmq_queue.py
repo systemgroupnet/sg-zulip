@@ -38,23 +38,17 @@ states = {
     3: "UNKNOWN",
 }
 
-MAX_SECONDS_TO_CLEAR_FOR_BURSTS: DefaultDict[str, int] = defaultdict(
-    lambda: 120,
-    digest_emails=600,
-)
-MAX_SECONDS_TO_CLEAR_NORMAL: DefaultDict[str, int] = defaultdict(
+MAX_SECONDS_TO_CLEAR: DefaultDict[str, int] = defaultdict(
     lambda: 30,
     digest_emails=1200,
     missedmessage_mobile_notifications=120,
+    embed_links=60,
 )
-CRITICAL_SECONDS_TO_CLEAR_FOR_BURSTS: DefaultDict[str, int] = defaultdict(
-    lambda: 240,
-    digest_emails=1200,
-)
-CRITICAL_SECONDS_TO_CLEAR_NORMAL: DefaultDict[str, int] = defaultdict(
+CRITICAL_SECONDS_TO_CLEAR: DefaultDict[str, int] = defaultdict(
     lambda: 60,
     missedmessage_mobile_notifications=180,
-    digest_emails=600,
+    digest_emails=1800,
+    embed_links=90,
 )
 
 def analyze_queue_stats(queue_name: str, stats: Dict[str, Any],
@@ -69,11 +63,16 @@ def analyze_queue_stats(queue_name: str, stats: Dict[str, Any],
         # Queue isn't updating the stats file and has some events in
         # the backlog, it's likely stuck.
         #
-        # TODO: There's an unfortunate race where if the queue has
-        # been empty for the last hour (because there haven't been 50
-        # new events in the last hour), and then gets a burst, this
-        # condition will be true for the first (event_handling_time *
-        # 50).
+        # TODO: There's an unlikely race condition here - if the queue
+        # was fully emptied and was idle due to no new events coming
+        # for over 180 seconds, suddenly gets a burst of events and
+        # this code runs exactly in the very small time window between
+        # those events popping up and the queue beginning to process
+        # the first one (which will refresh the stats file at the very
+        # start), we'll incorrectly return the CRITICAL status. The
+        # chance of that happening should be negligible because the queue
+        # worker should wake up immediately and log statistics before
+        # starting to process the first event.
         return dict(status=CRITICAL,
                     name=queue_name,
                     message='queue appears to be stuck, last update {}, queue size {}'.format(
@@ -91,34 +90,15 @@ def analyze_queue_stats(queue_name: str, stats: Dict[str, Any],
                     message='')
 
     expected_time_to_clear_backlog = current_size * average_consume_time
-    time_since_emptied = now - stats['queue_last_emptied_timestamp']
-    if time_since_emptied > max(300, CRITICAL_SECONDS_TO_CLEAR_FOR_BURSTS[queue_name]):
-        # We need the max() expression in case the rules for the queue
-        # permit longer processing times than 300s - to prevent
-        # incorrectly throwing an error by changing the classification
-        # of the the backlog from "burst" to "not burst" after 300s,
-        # while the worker is still processing it and staying below
-        # the CRITICAL threshold.
-        if expected_time_to_clear_backlog > MAX_SECONDS_TO_CLEAR_NORMAL[queue_name]:
-            if expected_time_to_clear_backlog > CRITICAL_SECONDS_TO_CLEAR_NORMAL[queue_name]:
-                status = CRITICAL
-            else:
-                status = WARNING
+    if expected_time_to_clear_backlog > MAX_SECONDS_TO_CLEAR[queue_name]:
+        if expected_time_to_clear_backlog > CRITICAL_SECONDS_TO_CLEAR[queue_name]:
+            status = CRITICAL
+        else:
+            status = WARNING
 
-            return dict(status=status,
-                        name=queue_name,
-                        message=f'clearing the backlog will take too long: {expected_time_to_clear_backlog}s, size: {current_size}')
-    else:
-        # We slept recently, so treat this as a burst.
-        if expected_time_to_clear_backlog > MAX_SECONDS_TO_CLEAR_FOR_BURSTS[queue_name]:
-            if expected_time_to_clear_backlog > CRITICAL_SECONDS_TO_CLEAR_FOR_BURSTS[queue_name]:
-                status = CRITICAL
-            else:
-                status = WARNING
-
-            return dict(status=status,
-                        name=queue_name,
-                        message=f'clearing the burst will take too long: {expected_time_to_clear_backlog}s, size: {current_size}')
+        return dict(status=status,
+                    name=queue_name,
+                    message=f'clearing the backlog will take too long: {expected_time_to_clear_backlog}s, size: {current_size}')
 
     return dict(status=OK,
                 name=queue_name,

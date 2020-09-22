@@ -149,6 +149,9 @@ THUMBOR_SERVES_CAMO = False
 THUMBNAIL_IMAGES = False
 SENDFILE_BACKEND: Optional[str] = None
 
+TORNADO_PORTS: List[int] = []
+USING_TORNADO = True
+
 # ToS/Privacy templates
 PRIVACY_POLICY: Optional[str] = None
 TERMS_OF_SERVICE: Optional[str] = None

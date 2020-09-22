@@ -2,18 +2,20 @@ import os
 import sys
 import time
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 from urllib.parse import urljoin
 
 from django.template.loaders import app_directories
 
 import zerver.lib.logging_util
+from scripts.lib.zulip_tools import get_tornado_ports
 from zerver.lib.db import TimeTrackingConnection
 
 from .config import (
     DEPLOY_ROOT,
     DEVELOPMENT,
     PRODUCTION,
+    config_file,
     get_config,
     get_from_file_if_exists,
     get_secret,
@@ -56,6 +58,7 @@ from .configured_settings import (
     SOCIAL_AUTH_SAML_ENABLED_IDPS,
     SOCIAL_AUTH_SAML_SECURITY_CONFIG,
     STATSD_HOST,
+    TORNADO_PORTS,
     USING_PGROONGA,
     ZULIP_ADMINISTRATOR,
 )
@@ -184,9 +187,9 @@ MIDDLEWARE = (
     'zerver.middleware.RateLimitMiddleware',
     'zerver.middleware.FlushDisplayRecipientCache',
     'zerver.middleware.ZulipCommonMiddleware',
-    'zerver.middleware.HostDomainMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.locale.LocaleMiddleware',
+    'zerver.middleware.LocaleMiddleware',
+    'zerver.middleware.HostDomainMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     # Make sure 2FA middlewares come after authentication middleware.
@@ -231,11 +234,10 @@ INSTALLED_APPS += EXTRA_INSTALLED_APPS
 ZILENCER_ENABLED = 'zilencer' in INSTALLED_APPS
 CORPORATE_ENABLED = 'corporate' in INSTALLED_APPS
 
-# Base URL of the Tornado server
-# We set it to None when running backend tests or populate_db.
-# We override the port number when running frontend tests.
-TORNADO_PROCESSES = int(get_config('application_server', 'tornado_processes', '1'))
-TORNADO_SERVER: Optional[str] = 'http://127.0.0.1:9993'
+if not TORNADO_PORTS:
+    TORNADO_PORTS = get_tornado_ports(config_file)
+TORNADO_PROCESSES = len(TORNADO_PORTS)
+
 RUNNING_INSIDE_TORNADO = False
 AUTORELOAD = DEBUG
 
@@ -396,8 +398,6 @@ REDIS_PASSWORD = get_secret('redis_password')
 ########################################################################
 # SECURITY SETTINGS
 ########################################################################
-
-SESSION_COOKIE_SAMESITE = 'Lax'
 
 # Tell the browser to never send our cookies without encryption, e.g.
 # when executing the initial http -> https redirect.
@@ -952,7 +952,7 @@ LOGGING: Dict[str, Any] = {
         },
         'zulip.zerver.webhooks': {
             'level': 'DEBUG',
-            'handlers': ['webhook_file'],
+            'handlers': ['file', 'errors_file', 'webhook_file'],
             'propagate': False,
         },
         'zulip.zerver.webhooks.unsupported': {

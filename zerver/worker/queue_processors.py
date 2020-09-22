@@ -39,6 +39,7 @@ from django.db.models import F
 from django.utils.timezone import now as timezone_now
 from django.utils.translation import override as override_language
 from django.utils.translation import ugettext as _
+from sentry_sdk import add_breadcrumb, configure_scope
 from zulip_bots.lib import ExternalBotHandler, extract_query_without_mention
 
 from zerver.context_processors import common_context
@@ -164,6 +165,7 @@ def retry_send_email_failures(
 class QueueProcessingWorker(ABC):
     queue_name: str
     CONSUME_ITERATIONS_BEFORE_UPDATE_STATS_NUM = 50
+    MAX_SECONDS_BEFORE_UPDATE_STATS = 30
 
     def __init__(self) -> None:
         self.q: Optional[SimpleQueueClient] = None
@@ -176,7 +178,9 @@ class QueueProcessingWorker(ABC):
         self.queue_last_emptied_timestamp = time.time()
         self.consumed_since_last_emptied = 0
         self.recent_consume_times: MutableSequence[Tuple[int, float]] = deque(maxlen=50)
-        self.consume_interation_counter = 0
+        self.consume_iteration_counter = 0
+        self.idle = True
+        self.last_statistics_update_time = 0.0
 
         self.update_statistics(0)
 
@@ -206,6 +210,7 @@ class QueueProcessingWorker(ABC):
                     orjson.dumps(stats_dict, option=orjson.OPT_APPEND_NEWLINE | orjson.OPT_INDENT_2)
                 )
             os.rename(tmp_fn, fn)
+        self.last_statistics_update_time = time.time()
 
     def get_remaining_queue_size(self) -> int:
         if self.q is not None:
@@ -223,7 +228,23 @@ class QueueProcessingWorker(ABC):
     def do_consume(self, consume_func: Callable[[List[Dict[str, Any]]], None],
                    events: List[Dict[str, Any]]) -> None:
         consume_time_seconds: Optional[float] = None
+        with configure_scope() as scope:
+            scope.clear_breadcrumbs()
+            add_breadcrumb(
+                type='debug',
+                category='queue_processor',
+                message=f"Consuming {self.queue_name}",
+                data={"events": events, "queue_size": self.get_remaining_queue_size()},
+            )
         try:
+            if self.idle:
+                # We're reactivating after having gone idle due to emptying the queue.
+                # We should update the stats file to keep it fresh and to make it clear
+                # that the queue started processing, in case the event we're about to process
+                # makes us freeze.
+                self.idle = False
+                self.update_statistics(self.get_remaining_queue_size())
+
             time_start = time.time()
             consume_func(events)
             consume_time_seconds = time.time() - time_start
@@ -241,11 +262,18 @@ class QueueProcessingWorker(ABC):
             if remaining_queue_size == 0:
                 self.queue_last_emptied_timestamp = time.time()
                 self.consumed_since_last_emptied = 0
+                # We've cleared all the events from the queue, so we don't
+                # need to worry about the small overhead of doing a disk write.
+                # We take advantage of this to update the stats file to keep it fresh,
+                # especially since the queue might go idle until new events come in.
+                self.update_statistics(0)
+                self.idle = True
+                return
 
-            self.consume_interation_counter += 1
-            if self.consume_interation_counter >= self.CONSUME_ITERATIONS_BEFORE_UPDATE_STATS_NUM:
-
-                self.consume_interation_counter = 0
+            self.consume_iteration_counter += 1
+            if (self.consume_iteration_counter >= self.CONSUME_ITERATIONS_BEFORE_UPDATE_STATS_NUM
+                    or time.time() - self.last_statistics_update_time >= self.MAX_SECONDS_BEFORE_UPDATE_STATS):
+                self.consume_iteration_counter = 0
                 self.update_statistics(remaining_queue_size)
 
     def consume_wrapper(self, data: Dict[str, Any]) -> None:
@@ -253,7 +281,12 @@ class QueueProcessingWorker(ABC):
         self.do_consume(consume_func, [data])
 
     def _handle_consume_exception(self, events: List[Dict[str, Any]]) -> None:
-        self._log_problem()
+        with configure_scope() as scope:
+            scope.set_context("events", {
+                "data": events,
+                "queue_name": self.queue_name,
+            })
+            logging.exception("Problem handling data on queue %s", self.queue_name, stack_info=True)
         if not os.path.exists(settings.QUEUE_ERROR_DIR):
             os.mkdir(settings.QUEUE_ERROR_DIR)  # nocoverage
         # Use 'mark_sanitized' to prevent Pysa from detecting this false positive
@@ -266,9 +299,6 @@ class QueueProcessingWorker(ABC):
             with open(fn, 'ab') as f:
                 f.write(line.encode('utf-8'))
         check_and_send_restart_signal()
-
-    def _log_problem(self) -> None:
-        logging.exception("Problem handling data on queue %s", self.queue_name, stack_info=True)
 
     def setup(self) -> None:
         self.q = SimpleQueueClient()

@@ -110,10 +110,10 @@ def pad_method_dict(method_dict: Dict[str, bool]) -> Dict[str, bool]:
 def auth_enabled_helper(backends_to_check: List[str], realm: Optional[Realm]) -> bool:
     if realm is not None:
         enabled_method_dict = realm.authentication_methods_dict()
-        pad_method_dict(enabled_method_dict)
     else:
         enabled_method_dict = {method: True for method in Realm.AUTHENTICATION_FLAGS}
-        pad_method_dict(enabled_method_dict)
+
+    pad_method_dict(enabled_method_dict)
     for supported_backend in supported_auth_backends():
         for backend_name in backends_to_check:
             backend = AUTH_BACKEND_NAME_MAP[backend_name]
@@ -203,6 +203,22 @@ def common_get_active_user(email: str, realm: Realm,
         return None
 
     return user_profile
+
+def is_subdomain_in_allowed_subdomains_list(subdomain: str, allowed_subdomains: List[str]) -> bool:
+    if subdomain in allowed_subdomains:
+        return True
+
+    # The root subdomain is a special case, as sending an
+    # empty string in the list of values of the attribute may
+    # not be viable. So, any of the ROOT_SUBDOMAIN_ALIASES can
+    # be used to signify the user is authorized for the root
+    # subdomain.
+    if (subdomain == Realm.SUBDOMAIN_FOR_ROOT_DOMAIN
+            and not settings.ROOT_DOMAIN_LANDING_PAGE
+            and any(alias in allowed_subdomains for alias in settings.ROOT_SUBDOMAIN_ALIASES)):
+        return True
+
+    return False
 
 AuthFuncT = TypeVar('AuthFuncT', bound=Callable[..., Optional[UserProfile]])
 rate_limiting_rules = settings.RATE_LIMITING_RULES['authenticate_by_username']
@@ -449,7 +465,7 @@ class ZulipLDAPAuthBackendBase(ZulipAuthMixin, LDAPBackend):
 
     def django_to_ldap_username(self, username: str) -> str:
         """
-        Translates django username (user_profile.email or whatever the user typed in the login
+        Translates django username (user_profile.delivery_email or whatever the user typed in the login
         field when authenticating via the ldap backend) into ldap username.
         Guarantees that the username it returns actually has an entry in the ldap directory.
         Raises ZulipLDAPExceptionNoMatchingLDAPUser if that's not possible.
@@ -1673,7 +1689,7 @@ class AppleAuthBackend(SocialAuthMixin, AppleIdAuth):
             # though AuthFailed would have been more correct.
             #
             # We have an open PR to python-social-auth to clean this up.
-            logging.info("/complete/apple/: %s", str(e))
+            self.logger.info("/complete/apple/: %s", str(e))
             return None
 
 @external_auth_method
@@ -1844,17 +1860,13 @@ class SAMLAuthBackend(SocialAuthMixin, SAMLAuth):
 
         subdomain = self.strategy.session_get('subdomain')
         entitlements: Union[str, List[str]] = attributes.get(org_membership_attribute, [])
-        if subdomain in entitlements:
-            return
+        if isinstance(entitlements, str):  # nocoverage
+            # This shouldn't happen as we'd always expect a list from this attribute even
+            # if it only has one element, but it's safer to have this defensive code.
+            entitlements = [entitlements, ]
+        assert isinstance(entitlements, list)
 
-        # The root subdomain is a special case, as sending an
-        # empty string in the list of values of the attribute may
-        # not be viable. So, any of the ROOT_SUBDOMAIN_ALIASES can
-        # be used to signify the user is authorized for the root
-        # subdomain.
-        if (subdomain == Realm.SUBDOMAIN_FOR_ROOT_DOMAIN
-                and not settings.ROOT_DOMAIN_LANDING_PAGE
-                and any(alias in entitlements for alias in settings.ROOT_SUBDOMAIN_ALIASES)):
+        if is_subdomain_in_allowed_subdomains_list(subdomain, entitlements):
             return
 
         error_msg = f"SAML user from IdP {idp.name} rejected due to missing entitlement " + \

@@ -1,9 +1,22 @@
+# Zulip's OpenAPI-based API documentation system is documented at
+#   https://zulip.readthedocs.io/en/latest/documentation/api.html
+#
+# This file contains helper functions for generating cURL examples
+# based on Zulip's OpenAPI definitions, as well as test setup and
+# fetching of appropriate parameter values to use when running the
+# cURL examples as part of the tools/test-api test suite.
+
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from django.utils.timezone import now as timezone_now
 
-from zerver.lib.actions import do_add_reaction, do_add_realm_filter, update_user_presence
+from zerver.lib.actions import (
+    do_add_reaction,
+    do_add_realm_filter,
+    do_create_user,
+    update_user_presence,
+)
 from zerver.lib.events import do_events_register
 from zerver.lib.test_classes import ZulipTestCase
 from zerver.models import Client, Message, UserGroup, UserPresence, get_realm
@@ -208,4 +221,14 @@ def remove_realm_filters() -> Dict[str, object]:
 def upload_custom_emoji() -> Dict[str, object]:
     return {
         "filename": "zerver/tests/images/animated_img.gif",
+    }
+
+@openapi_param_value_generator(["/users/{user_id}:delete"])
+def deactivate_user() -> Dict[str, object]:
+    user_profile = do_create_user(
+        email='testuser@zulip.com', password=None,
+        full_name='test_user', realm=get_realm('zulip')
+    )
+    return {
+        "user_id": user_profile.id
     }

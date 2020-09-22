@@ -17,6 +17,10 @@ from .settings import (
     WEBPACK_LOADER,
 )
 
+FULL_STACK_ZULIP_TEST = "FULL_STACK_ZULIP_TEST" in os.environ
+PUPPETEER_TESTS = "PUPPETEER_TESTS" in os.environ
+
+
 FAKE_EMAIL_DOMAIN = "zulip.testserver"
 
 # Clear out the REALM_HOSTS set in dev_settings.py
@@ -36,16 +40,15 @@ DATABASES["default"] = {
     "OPTIONS": {"connection_factory": TimeTrackingConnection},
 }
 
-TORNADO_SERVER = os.environ.get("TORNADO_SERVER")
-if TORNADO_SERVER is not None:
-    # This covers the Casper test suite case
-    pass
+
+if FULL_STACK_ZULIP_TEST:
+    TORNADO_PORTS = [9983]
 else:
-    # This covers the backend test suite case
+    # Backend tests don't use tornado
+    USING_TORNADO = False
     CAMO_URI = 'https://external-content.zulipcdn.net/external_content/'
     CAMO_KEY = 'dummy'
 
-PUPPETEER_TESTS = "PUPPETEER_TESTS" in os.environ
 if PUPPETEER_TESTS:
     # Disable search pills prototype for production use
     SEARCH_PILLS_ENABLED = False
@@ -60,7 +63,7 @@ if "BAN_CONSOLE_OUTPUT" in os.environ:
     BAN_CONSOLE_OUTPUT = True
 
 # Decrease the get_updates timeout to 1 second.
-# This allows CasperJS to proceed quickly to the next test step.
+# This allows frontend tests to proceed quickly to the next test step.
 POLL_TIMEOUT = 1000
 
 # Stores the messages in `django.core.mail.outbox` rather than sending them.
@@ -151,7 +154,7 @@ ENABLE_FILE_LINKS = True
 # These settings are set dynamically in `zerver/lib/test_runner.py`:
 TEST_WORKER_DIR = ''
 # Allow setting LOCAL_UPLOADS_DIR in the environment so that the
-# Casper/API tests in test_server.py can control this.
+# frontend/API tests in test_server.py can control this.
 if "LOCAL_UPLOADS_DIR" in os.environ:
     LOCAL_UPLOADS_DIR = os.getenv("LOCAL_UPLOADS_DIR")
 # Otherwise, we use the default value from dev_settings.py
